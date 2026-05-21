@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="app-title">Iskola Csengető telefon</title>
+    <link rel="manifest" href="manifest.json">
+    <!-- Az Android állapotsorának alapértelmezett színe -->
+    <meta name="theme-color" id="theme-meta" content="#f0f2f5">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; transition: background-color 0.3s; }
+        
+        /* Kisebb és kompaktabb felső kártya */
+        .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 380px; text-align: center; margin-bottom: 15px; transition: transform 0.3s; }
+        h1 { color: #1a73e8; margin-top: 0; font-size: 1.5rem; margin-bottom: 5px; }
+        .time-display { font-size: 2.2rem; font-weight: bold; color: #333; margin: 5px 0; }
+        .status { font-size: 1rem; color: #666; margin-bottom: 5px; }
+        .bell-active-status { font-size: 1.1rem; font-weight: bold; color: #d32f2f; margin: 5px 0; min-height: 22px; }
+        .countdown { font-size: 1.2rem; color: #e53935; font-weight: bold; }
+        
+        /* Kisebb és vékonyabb hangerő panel */
+        .volume-container { margin: 10px 0 5px 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+        .volume-container label { font-size: 0.8rem; color: #555; font-weight: bold; }
+        .volume-slider { width: 50%; max-width: 150px; height: 4px; cursor: pointer; }
+
+        /* Kerek STOP gomb */
+        .stop-btn { 
+            background: #d32f2f; 
+            color: white; 
+            border: none; 
+            width: 42px; 
+            height: 42px; 
+            font-size: 1.1rem; 
+            font-weight: bold; 
+            border-radius: 50%; 
+            cursor: pointer; 
+            transition: background 0.2s, transform 0.1s; 
+            position: relative; 
+            z-index: 10; 
+            margin-top: 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .stop-btn:hover { background: #b71c1c; transform: scale(1.05); }
+        .stop-btn:active { transform: scale(0.95); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: center; font-weight: bold; }
+        th { background: #f5f5f5; color: #333; }
+        
+        .current-row { color: #2e7d32; background-color: #e8f5e9; border: 2px solid #2e7d32; }
+        .future-row { color: #c62828; background-color: #ffebee; }
+
+        @keyframes flash-animation {
+            0% { background-color: #f0f2f5; }
+            50% { background-color: #ffcdd2; }
+            100% { background-color: #f0f2f5; }
+        }
+        .flashing-bg {
+            animation: flash-animation 0.8s infinite;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <div id="clock" class="time-display">00:00:00</div>
+        <div id="status" class="status">Betöltés...</div>
+        <div id="bell-active" class="bell-active-status"></div>
+        <div id="countdown" class="countdown">--:--</div>
+        
+        <div class="volume-container">
+            <label for="volume">🔊 Hangerő: <span id="volume-label">80%</span></label>
+            <input type="range" id="volume" class="volume-slider" min="0" max="100" value="80" oninput="changeVolume(this.value)">
+        </div>
+
+        <button class="stop-btn" onclick="stopBell()" title="STOP">🛑</button>
+    </div>
+
+    <div class="card">
+        <h3>Csengetési Rend</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Óra</th>
+                    <th>Kezdet</th>
+                    <th>Vége</th>
+                </tr>
+            </thead>
+            <tbody id="schedule-table">
+                <!-- JavaScript tölti fel -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- MÓDOSÍTVA: Külső, saját helyi MP3 fájlok használata -->
+    <audio id="in-bell" src="becsengetes.mp3" preload="auto"></audio>
+    <audio id="out-bell" src="kicsengetes.mp3" preload="auto"></audio>
+
+    <script>
+        const schedule = [
+            { id: 1, start: "08:00", end: "08:45" },
+            { id: 2, start: "08:55", end: "09:40" },
+            { id: 3, start: "09:50", end: "10:35" },
+            { id: 4, start: "10:55", end: "11:40" },
+            { id: 5, start: "11:55", end: "12:40" },
+            { id: 6, start: "12:55", end: "13:40" },
+            { id: 7, start: "13:55", end: "14:40" },
+            { id: 8, start: "14:55", end: "15:40" }
+        ];
+
+        const inBellAudio = document.getElementById('in-bell');
+        const outBellAudio = document.getElementById('out-bell');
+        const tbody = document.getElementById('schedule-table');
+        const bellStatusDiv = document.getElementById('bell-active');
+        const themeMeta = document.getElementById('theme-meta');
+        const appTitle = document.getElementById('app-title');
+
+        let titleFlashInterval = null;
+        let isBellActive = false;
+
+        function changeVolume(value) {
+            const volumeDecimal = value / 100;
+            inBellAudio.volume = volumeDecimal;
+            outBellAudio.volume = volumeDecimal;
+            document.getElementById('volume-label').innerText = value + "%";
+        }
+
+        changeVolume(80);
+
+        function startTitleFlashing(text) {
+            isBellActive = true;
+            let showEmoji = true;
+            
+            titleFlashInterval = setInterval(() => {
+                if (showEmoji) {
+                    appTitle.innerText = `🔔 ${text} 🔔`;
+                    themeMeta.setAttribute("content", "#ffcdd2");
+                } else {
+                    appTitle.innerText = `🔕 ${text} 🔕`;
+                    themeMeta.setAttribute("content", "#f0f2f5");
+                }
+                showEmoji = !showEmoji;
+            }, 400); 
+        }
+
+        function stopBell() {
+            inBellAudio.pause();
+            inBellAudio.currentTime = 0;
+            outBellAudio.pause();
+            outBellAudio.currentTime = 0;
+            bellStatusDiv.innerText = "";
+            isBellActive = false;
+            document.body.classList.remove('flashing-bg');
+            clearInterval(titleFlashInterval);
+            appTitle.innerText = "Iskola Csengető telefon";
+            themeMeta.setAttribute("content", "#f0f2f5");
+        }
+
+        document.body.addEventListener('click', function() {}, { once: true });
+
+        function updateTableColors(currentMinutes) {
+            tbody.innerHTML = ""; 
+
+            schedule.forEach(item => {
+                const [sHours, sMinutes] = item.start.split(':').map(Number);
+                const [eHours, eMinutes] = item.end.split(':').map(Number);
+
+                const startTotalMin = sHours * 60 + sMinutes;
+                const endTotalMin = eHours * 60 + eMinutes;
+
+                let rowClass = "";
+
+                if (currentMinutes >= endTotalMin) {
+                    return; 
+                } else if (currentMinutes >= startTotalMin && currentMinutes < endTotalMin) {
+                    rowClass = "current-row";    
+                } else {
+                    rowClass = "future-row";     
+                }
+
+                tbody.innerHTML += `
+                    <tr class="${rowClass}">
+                        <td>${item.id}. óra</td>
+                        <td>${item.start}</td>
+                        <td>${item.end}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        function checkTime() {
+            const now = new Date();
+            
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            document.getElementById('clock').innerText = `${hours}:${minutes}:${seconds}`;
+
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            const currentSeconds = now.getSeconds();
+
+            if (hours === "00" && minutes === "00" && seconds === "00") {
+                updateTableColors(0);
+                return;
+            }
+
+            updateTableColors(currentMinutes);
+
+            if (inBellAudio.paused && outBellAudio.paused && isBellActive) {
+                stopBell(); 
+            }
+
+            schedule.forEach(item => {
+                const [sHours, sMinutes] = item.start.split(':').map(Number);
+                const [eHours, eMinutes] = item.end.split(':').map(Number);
+
+                const startTotalMin = sHours * 60 + sMinutes;
+                const endTotalMin = eHours * 60 + eMinutes;
+
+                // BECSENGETÉS
+                if (currentMinutes === startTotalMin && currentSeconds === 0) {
+                    bellStatusDiv.innerText = `🔔 ${item.id}. ÓRA: BECSENGETÉS!`;
+                    document.body.classList.add('flashing-bg');
+                    startTitleFlashing("BECSENGETÉS");
+                    inBellAudio.play().catch(e => console.log("Lejátszás blokkolva. Kattints a kijelzőre!"));
+                }
+
+                // KICSENGETÉS
+                if (currentMinutes === endTotalMin && currentSeconds === 0) {
+                    bellStatusDiv.innerText = `🔔 ${item.id}. ÓRA: KICSENGETÉS!`;
+                    document.body.classList.add('flashing-bg');
+                    startTitleFlashing("KICSENGETÉS");
+                    outBellAudio.play().catch(e => console.log("Lejátszás blokkolva. Kattints a kijelzőre!"));
+                }
+            });
+
+            if (!isBellActive) {
+                let statusText = "Nincs tanítás";
+                let nextBellInSeconds = null;
+
+                schedule.forEach(item => {
+                    const [sHours, sMinutes] = item.start.split(':').map(Number);
+                    const [eHours, eMinutes] = item.end.split(':').map(Number);
+                    const startTotalMin = sHours * 60 + sMinutes;
+                    const endTotalMin = eHours * 60 + eMinutes;
+
+                    if (currentMinutes >= startTotalMin && currentMinutes < endTotalMin) {
+                        statusText = `${item.id}. óra tart`;
+                        nextBellInSeconds = (endTotalMin * 60) - (currentMinutes * 60 + currentSeconds);
+                    } else if (currentMinutes < startTotalMin && nextBellInSeconds === null) {
+                        statusText = `Szünet van (${item.id}. óra következik)`;
+                        nextBellInSeconds = (startTotalMin * 60) - (currentMinutes * 60 + currentSeconds);
+                    }
+                });
+
+                document.getElementById('status').innerText = statusText;
+
+                if (nextBellInSeconds !== null) {
+                    const min = Math.floor(nextBellInSeconds / 60);
+                    const sec = nextBellInSeconds % 60;
+                    document.getElementById('countdown').innerText = `Következő csengetés: ${min}:${sec < 10 ? '0' : ''}${sec}`;
+                } else {
+                    document.getElementById('countdown').innerText = "Mára vége a tanításnak";
+                }
+            }
+        }
+
+        setInterval(checkTime, 1000);
+        checkTime();
+
+        // Integrált offline regisztrációs szkript
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('Offline mód aktív!'))
+                .catch(err => console.log('Szkript hiba:', err));
+            });
+        }
+    </script>
+</body>
+</html>
