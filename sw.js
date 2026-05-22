@@ -1,19 +1,18 @@
-const CACHE_NAME = 'csengeto-v3';
+const CACHE_NAME = 'csengeto-v10'; // Átírva v10-re, hogy a telefon biztosan frissítsen
 
-// Most már a helyi fájlokat menti le offline használatra
+// Csak a saját, belső fájljaidat gyorsítótárazzuk!
 const ASSETS = [
   'index.html',
   'manifest.json',
-  'becsengetes.mp3',
-  'kicsengetes.mp3',
-  'https://mixkit.co', // Biztonsági tartalék
-  'https://flaticon.com'
+  'in.mp3',
+  'out.mp3',
+  'icon.png'  // Az ikont is elmenti offline használatra
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(ASSETS);
+      return cache.addAll(ASSETS).catch(err => console.error("Cache hiba:", err));
     })
   );
   self.skipWaiting();

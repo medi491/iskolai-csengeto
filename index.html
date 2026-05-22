@@ -22,36 +22,16 @@
         .volume-container { margin: 10px 0 5px 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
         .volume-container label { font-size: 0.8rem; color: #555; font-weight: bold; }
         .volume-slider { width: 50%; max-width: 150px; height: 4px; cursor: pointer; }
-
-        /* Kerek STOP gomb */
-        .stop-btn { 
-            background: #d32f2f; 
-            color: white; 
-            border: none; 
-            width: 42px; 
-            height: 42px; 
-            font-size: 1.1rem; 
-            font-weight: bold; 
-            border-radius: 50%; 
-            cursor: pointer; 
-            transition: background 0.2s, transform 0.1s; 
-            position: relative; 
-            z-index: 10; 
-            margin-top: 5px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        .stop-btn:hover { background: #b71c1c; transform: scale(1.05); }
-        .stop-btn:active { transform: scale(0.95); }
         
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: center; font-weight: bold; }
-        th { background: #f5f5f5; color: #333; }
+        th { background: #f5f5f5; color: #333; font-size: 0.9rem; }
         
-        .current-row { color: #2e7d32; background-color: #e8f5e9; border: 2px solid #2e7d32; }
-        .future-row { color: #c62828; background-color: #ffebee; }
+        /* Az aktuális óra kiemelt méretű és zöld */
+        .current-row { font-size: 1.1rem; color: #2e7d32; background-color: #e8f5e9; border: 2px solid #2e7d32; }
+        
+        /* A jövőbeli órák kisebbek, de piros színűek és pirosas hátterűek maradtak */
+        .future-row { font-size: 0.8rem; color: #c62828; background-color: #ffebee; opacity: 0.9; }
 
         @keyframes flash-animation {
             0% { background-color: #f0f2f5; }
@@ -66,17 +46,16 @@
 <body>
 
     <div class="card">
+        <h1>Iskolai Csengető</h1>
         <div id="clock" class="time-display">00:00:00</div>
         <div id="status" class="status">Betöltés...</div>
         <div id="bell-active" class="bell-active-status"></div>
         <div id="countdown" class="countdown">--:--</div>
         
         <div class="volume-container">
-            <label for="volume">🔊 Hangerő: <span id="volume-label">80%</span></label>
-            <input type="range" id="volume" class="volume-slider" min="0" max="100" value="80" oninput="changeVolume(this.value)">
+            <label for="volume">🔊 Hangerő: <span id="volume-label">50%</span></label>
+            <input type="range" id="volume" class="volume-slider" min="0" max="100" value="50" oninput="changeVolume(this.value)">
         </div>
-
-        <button class="stop-btn" onclick="stopBell()" title="STOP">🛑</button>
     </div>
 
     <div class="card">
@@ -95,11 +74,16 @@
         </table>
     </div>
 
-    <!-- MÓDOSÍTVA: Külső, saját helyi MP3 fájlok használata -->
-    <audio id="in-bell" src="becsengetes.mp3" preload="auto"></audio>
-    <audio id="out-bell" src="kicsengetes.mp3" preload="auto"></audio>
+    <!-- Külső, saját helyi MP3 fájlok használata -->
+    <audio id="in-bell" src="in.mp3" preload="auto"></audio>
+    <audio id="out-bell" src="out.mp3" preload="auto"></audio>
 
     <script>
+        // PWA Service Worker regisztráció (Hogy offline is működjön)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.log("SW hiba:", err));
+        }
+
         const schedule = [
             { id: 1, start: "08:00", end: "08:45" },
             { id: 2, start: "08:55", end: "09:40" },
@@ -128,13 +112,15 @@
             document.getElementById('volume-label').innerText = value + "%";
         }
 
-        changeVolume(80);
+        changeVolume(50);
 
         function startTitleFlashing(text) {
+            if (isBellActive) return; 
             isBellActive = true;
-            let showEmoji = true;
+            document.body.classList.add('flashing-bg');
             
             titleFlashInterval = setInterval(() => {
+                let showEmoji = (Math.floor(Date.now() / 400) % 2 === 0);
                 if (showEmoji) {
                     appTitle.innerText = `🔔 ${text} 🔔`;
                     themeMeta.setAttribute("content", "#ffcdd2");
@@ -142,15 +128,11 @@
                     appTitle.innerText = `🔕 ${text} 🔕`;
                     themeMeta.setAttribute("content", "#f0f2f5");
                 }
-                showEmoji = !showEmoji;
             }, 400); 
         }
 
-        function stopBell() {
-            inBellAudio.pause();
-            inBellAudio.currentTime = 0;
-            outBellAudio.pause();
-            outBellAudio.currentTime = 0;
+        // Amikor a hangfájl véget ér, automatikusan leállítja a villogást is
+        function stopBellAndVisuals() {
             bellStatusDiv.innerText = "";
             isBellActive = false;
             document.body.classList.remove('flashing-bg');
@@ -159,7 +141,15 @@
             themeMeta.setAttribute("content", "#f0f2f5");
         }
 
-        document.body.addEventListener('click', function() {}, { once: true });
+        // Eseménykezelők: amikor az MP3-nak vége, a villogás is azonnal leáll
+        inBellAudio.addEventListener('ended', stopBellAndVisuals);
+        outBellAudio.addEventListener('ended', stopBellAndVisuals);
+
+        // Aktiválás első érintésre (Böngésző hanglejátszási korlátozás feloldása)
+        document.body.addEventListener('click', function() {
+            inBellAudio.play().then(() => { inBellAudio.pause(); }).catch(e => {});
+            outBellAudio.play().then(() => { outBellAudio.pause(); }).catch(e => {});
+        }, { once: true });
 
         function updateTableColors(currentMinutes) {
             tbody.innerHTML = ""; 
@@ -171,14 +161,12 @@
                 const startTotalMin = sHours * 60 + sMinutes;
                 const endTotalMin = eHours * 60 + eMinutes;
 
-                let rowClass = "";
+                let rowClass = "future-row";
 
                 if (currentMinutes >= endTotalMin) {
                     return; 
                 } else if (currentMinutes >= startTotalMin && currentMinutes < endTotalMin) {
                     rowClass = "current-row";    
-                } else {
-                    rowClass = "future-row";     
                 }
 
                 tbody.innerHTML += `
@@ -193,92 +181,75 @@
 
         function checkTime() {
             const now = new Date();
-            
             const hours = String(now.getHours()).padStart(2, '0');
             const minutes = String(now.getMinutes()).padStart(2, '0');
             const seconds = String(now.getSeconds()).padStart(2, '0');
+            
+            const currentTimeStr = `${hours}:${minutes}`;
+            const currentSeconds = now.getSeconds();
             document.getElementById('clock').innerText = `${hours}:${minutes}:${seconds}`;
 
             const currentMinutes = now.getHours() * 60 + now.getMinutes();
-            const currentSeconds = now.getSeconds();
-
-            if (hours === "00" && minutes === "00" && seconds === "00") {
-                updateTableColors(0);
-                return;
-            }
-
             updateTableColors(currentMinutes);
 
-            if (inBellAudio.paused && outBellAudio.paused && isBellActive) {
-                stopBell(); 
-            }
+            let currentStatus = "Szünet van";
+            let nextTargetInMinutes = null;
 
-            schedule.forEach(item => {
+            for (let item of schedule) {
                 const [sHours, sMinutes] = item.start.split(':').map(Number);
                 const [eHours, eMinutes] = item.end.split(':').map(Number);
+                const startTotal = sHours * 60 + sMinutes;
+                const endTotal = eHours * 60 + eMinutes;
 
-                const startTotalMin = sHours * 60 + sMinutes;
-                const endTotalMin = eHours * 60 + eMinutes;
-
-                // BECSENGETÉS
-                if (currentMinutes === startTotalMin && currentSeconds === 0) {
-                    bellStatusDiv.innerText = `🔔 ${item.id}. ÓRA: BECSENGETÉS!`;
-                    document.body.classList.add('flashing-bg');
-                    startTitleFlashing("BECSENGETÉS");
-                    inBellAudio.play().catch(e => console.log("Lejátszás blokkolva. Kattints a kijelzőre!"));
-                }
-
-                // KICSENGETÉS
-                if (currentMinutes === endTotalMin && currentSeconds === 0) {
-                    bellStatusDiv.innerText = `🔔 ${item.id}. ÓRA: KICSENGETÉS!`;
-                    document.body.classList.add('flashing-bg');
-                    startTitleFlashing("KICSENGETÉS");
-                    outBellAudio.play().catch(e => console.log("Lejátszás blokkolva. Kattints a kijelzőre!"));
-                }
-            });
-
-            if (!isBellActive) {
-                let statusText = "Nincs tanítás";
-                let nextBellInSeconds = null;
-
-                schedule.forEach(item => {
-                    const [sHours, sMinutes] = item.start.split(':').map(Number);
-                    const [eHours, eMinutes] = item.end.split(':').map(Number);
-                    const startTotalMin = sHours * 60 + sMinutes;
-                    const endTotalMin = eHours * 60 + eMinutes;
-
-                    if (currentMinutes >= startTotalMin && currentMinutes < endTotalMin) {
-                        statusText = `${item.id}. óra tart`;
-                        nextBellInSeconds = (endTotalMin * 60) - (currentMinutes * 60 + currentSeconds);
-                    } else if (currentMinutes < startTotalMin && nextBellInSeconds === null) {
-                        statusText = `Szünet van (${item.id}. óra következik)`;
-                        nextBellInSeconds = (startTotalMin * 60) - (currentMinutes * 60 + currentSeconds);
+                // Pontos másodperces csengetési trigger
+                if (currentSeconds === 0 && !isBellActive) {
+                    if (currentTimeStr === item.start) {
+                        bellStatusDiv.innerText = "BECSENGETÉS!";
+                        startTitleFlashing("BECSENGETÉS");
+                        inBellAudio.play().catch(e => {
+                            console.log("Hiba:", e);
+                            stopBellAndVisuals();
+                        });
+                    } else if (currentTimeStr === item.end) {
+                        bellStatusDiv.innerText = "KICSENGETÉS!";
+                        startTitleFlashing("KICSENGETÉS");
+                        outBellAudio.play().catch(e => {
+                            console.log("Hiba:", e);
+                            stopBellAndVisuals();
+                        });
                     }
-                });
-
-                document.getElementById('status').innerText = statusText;
-
-                if (nextBellInSeconds !== null) {
-                    const min = Math.floor(nextBellInSeconds / 60);
-                    const sec = nextBellInSeconds % 60;
-                    document.getElementById('countdown').innerText = `Következő csengetés: ${min}:${sec < 10 ? '0' : ''}${sec}`;
-                } else {
-                    document.getElementById('countdown').innerText = "Mára vége a tanításnak";
                 }
+
+                if (currentMinutes >= startTotal && currentMinutes < endTotal) {
+                    currentStatus = `${item.id}. óra tart`;
+                    nextTargetInMinutes = endTotal;
+                    break;
+                } else if (currentMinutes < startTotal) {
+                    currentStatus = `Szünet van (${item.id}. óra előtt)`;
+                    nextTargetInMinutes = startTotal;
+                    break;
+                }
+            }
+
+            document.getElementById('status').innerText = currentStatus;
+
+            if (nextTargetInMinutes !== null) {
+                const diffMinutes = nextTargetInMinutes - currentMinutes - 1;
+                const diffSeconds = 60 - currentSeconds;
+                
+                if (diffSeconds === 60) {
+                    document.getElementById('countdown').innerText = `${String(diffMinutes + 1).padStart(2, '0')}:00`;
+                } else {
+                    document.getElementById('countdown').innerText = `${String(diffMinutes).padStart(2, '0')}:${String(diffSeconds).padStart(2, '0')}`;
+                }
+            } else {
+                document.getElementById('countdown').innerText = "--:--";
+                document.getElementById('status').innerText = "Tanítás véget ért";
             }
         }
 
         setInterval(checkTime, 1000);
         checkTime();
-
-        // Integrált offline regisztrációs szkript
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                .then(reg => console.log('Offline mód aktív!'))
-                .catch(err => console.log('Szkript hiba:', err));
-            });
-        }
     </script>
 </body>
 </html>
